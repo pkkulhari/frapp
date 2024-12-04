@@ -33,8 +33,9 @@ class CameraService {
     return _controller;
   }
 
-  img.Image convertNV21ToImage(Uint8List nv21Data, int width, int height) {
-    final image = img.Image(width: width, height: height);
+  static img.Image convertNV21ToImage(
+      Uint8List nv21Data, int width, int height) {
+    img.Image image = img.Image(width: width, height: height);
     final ySize = width * height;
     final uvSize = width * height ~/ 4;
 

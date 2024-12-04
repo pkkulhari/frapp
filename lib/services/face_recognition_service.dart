@@ -1,7 +1,9 @@
 // import 'dart:io';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:frapp/services/camera_service.dart';
 import 'package:image/image.dart' as img;
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
@@ -24,9 +26,6 @@ class FaceRecognitionService {
   Future<void> initialize() async {
     if (_isInitialized) return;
     final interpreterOptions = InterpreterOptions();
-    // interpreterOptions.threads = 4;
-    // interpreterOptions.useNnApiForAndroid = true;
-    // interpreterOptions.useMetalDelegateForIOS = true;
 
     _interpreter = await Interpreter.fromAsset('assets/mobilefacenet.tflite',
         options: interpreterOptions);
@@ -34,15 +33,35 @@ class FaceRecognitionService {
     _isInitialized = true;
   }
 
-  Future<List<double>?> getEmbedding(img.Image srcImage, Face face) async {
+  static List prepareInputFromNV21(Map<String, dynamic> params) {
+    final nv21Data = params['nv21Data'] as Uint8List;
+    final width = params['width'] as int;
+    final height = params['height'] as int;
+    final isFrontCamera = params['isFrontCamera'] as bool;
+    final face = params['face'] as Face;
+
+    img.Image image = CameraService.convertNV21ToImage(nv21Data, width, height);
+    image = img.copyRotate(image, angle: isFrontCamera ? -90 : 90);
+
+    return prepareInput(image, face);
+  }
+
+  static List prepareInputFromImagePath(Map<String, dynamic> params) {
+    final imgPath = params['imgPath'] as String;
+    final face = params['face'] as Face;
+
+    img.Image image = img.decodeImage(File(imgPath).readAsBytesSync())!;
+    return prepareInput(image, face);
+  }
+
+  static List prepareInput(img.Image image, Face face) {
     int x, y, w, h;
     x = face.boundingBox.left.round();
     y = face.boundingBox.top.round();
     w = face.boundingBox.width.round();
     h = face.boundingBox.height.round();
 
-    img.Image faceImage =
-        img.copyCrop(srcImage, x: x, y: y, width: w, height: h);
+    img.Image faceImage = img.copyCrop(image, x: x, y: y, width: w, height: h);
     img.Image resizedImage = img.copyResizeCropSquare(faceImage, size: 112);
 
     // Save cropped face image
@@ -52,12 +71,17 @@ class FaceRecognitionService {
 
     List input = _imageToByteListFloat32(resizedImage, 112, 127.5, 127.5);
     input = input.reshape([1, 112, 112, 3]);
+
+    return input;
+  }
+
+  List<double> getEmbedding(List input) {
     List output = List.generate(1, (_) => List.filled(192, 0));
     _interpreter.run(input, output);
     return output[0].cast<double>();
   }
 
-  List _imageToByteListFloat32(
+  static List _imageToByteListFloat32(
       img.Image image, int size, double mean, double std) {
     var convertedBytes = Float32List(1 * size * size * 3);
     var buffer = Float32List.view(convertedBytes.buffer);
@@ -84,7 +108,7 @@ class FaceRecognitionService {
     _cachedFaces ??= await _storageService.getFaces();
 
     double minDistance = double.maxFinite;
-    String name = 'Unknown';
+    String name = 'Kaun hai re tu?'; // Unknown
 
     for (var face in _cachedFaces!) {
       final distance =
@@ -119,7 +143,7 @@ class FaceRecognitionService {
     return _cachedFaces!;
   }
 
-  Future<List<Face>> processImage(InputImage inputImage) async {
+  Future<List<Face>> detectFaces(InputImage inputImage) async {
     final faces = await _faceDetector.processImage(inputImage);
     return faces;
   }

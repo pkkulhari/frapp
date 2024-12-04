@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -8,7 +7,6 @@ import 'package:frapp/services/face_recognition_service.dart';
 import 'package:frapp/services/camera_service.dart';
 import 'package:frapp/widgets/face_detector_painter.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
-import 'package:image/image.dart' as img;
 import 'package:flutter/services.dart';
 
 class RegisterFace {
@@ -53,85 +51,88 @@ class _RecognizeFacePageState extends State<RecognizeFacePage> {
     if (_isBusy) return;
     _isBusy = true;
 
-    final orientations = {
-      DeviceOrientation.portraitUp: 0,
-      DeviceOrientation.landscapeLeft: 90,
-      DeviceOrientation.portraitDown: 180,
-      DeviceOrientation.landscapeRight: 270,
-    };
-
-    InputImageRotation? rotation;
-    if (Platform.isIOS) {
-      rotation =
-          InputImageRotationValue.fromRawValue(widget.camera.sensorOrientation);
-    } else {
-      var rotationCompensation =
-          orientations[_cameraService.controller.value.deviceOrientation];
-      if (rotationCompensation == null) return;
-      if (widget.camera.lensDirection == CameraLensDirection.front) {
-        rotationCompensation =
-            (widget.camera.sensorOrientation + rotationCompensation) % 360;
+    try {
+      // Prepare input image
+      final orientations = {
+        DeviceOrientation.portraitUp: 0,
+        DeviceOrientation.landscapeLeft: 90,
+        DeviceOrientation.portraitDown: 180,
+        DeviceOrientation.landscapeRight: 270,
+      };
+      InputImageRotation? rotation;
+      if (Platform.isIOS) {
+        rotation = InputImageRotationValue.fromRawValue(
+            widget.camera.sensorOrientation);
       } else {
-        rotationCompensation =
-            (widget.camera.sensorOrientation - rotationCompensation + 360) %
-                360;
+        var rotationCompensation =
+            orientations[_cameraService.controller.value.deviceOrientation];
+        if (rotationCompensation == null) return;
+        if (widget.camera.lensDirection == CameraLensDirection.front) {
+          rotationCompensation =
+              (widget.camera.sensorOrientation + rotationCompensation) % 360;
+        } else {
+          rotationCompensation =
+              (widget.camera.sensorOrientation - rotationCompensation + 360) %
+                  360;
+        }
+        rotation = InputImageRotationValue.fromRawValue(rotationCompensation);
       }
-      rotation = InputImageRotationValue.fromRawValue(rotationCompensation);
-    }
-    if (rotation == null) return;
-    final format = InputImageFormatValue.fromRawValue(image.format.raw);
-    if (format == null) return;
+      if (rotation == null) return;
+      final format = InputImageFormatValue.fromRawValue(image.format.raw);
+      if (format == null) return;
 
-    InputImage inputImage = InputImage.fromBytes(
-      bytes: image.planes[0].bytes,
-      metadata: InputImageMetadata(
-        size: Size(image.width.toDouble(), image.height.toDouble()),
-        rotation: rotation,
-        format: format,
-        bytesPerRow: image.planes[0].bytesPerRow,
-      ),
-    );
+      InputImage inputImage = InputImage.fromBytes(
+        bytes: image.planes[0].bytes,
+        metadata: InputImageMetadata(
+          size: Size(image.width.toDouble(), image.height.toDouble()),
+          rotation: rotation,
+          format: format,
+          bytesPerRow: image.planes[0].bytesPerRow,
+        ),
+      );
 
-    final faces = await _faceService.processImage(inputImage);
-    if (faces.isEmpty) {
-      if (mounted) {
-        setState(() => _customPaint = null);
+      // Detect faces
+      final faces = await _faceService.detectFaces(inputImage);
+      if (faces.isEmpty) {
+        if (mounted) {
+          setState(() => _customPaint = null);
+        }
+        _isBusy = false;
+        return;
       }
-      _isBusy = false;
-      return;
-    }
-    // Get embedding for the first face
-    img.Image srcImage = _cameraService.convertNV21ToImage(
-        image.planes[0].bytes, image.width, image.height);
-    srcImage = (widget.camera.lensDirection == CameraLensDirection.front)
-        ? img.copyRotate(srcImage, angle: -90)
-        : img.copyRotate(srcImage, angle: 90);
 
-    final embedding = await _faceService.getEmbedding(srcImage, faces.first);
-    if (embedding == null) {
-      if (mounted) {
-        setState(() => _customPaint = null);
-      }
-      _isBusy = false;
-      return;
-    }
-    String name = await _faceService.identifyFace(embedding);
-
-    if (mounted) {
-      setState(() {
-        _customPaint = CustomPaint(
-          painter: FaceDetectorPainter(
-            faces,
-            inputImage.metadata!.size,
-            inputImage.metadata!.rotation,
-            widget.camera.lensDirection,
-            name,
-          ),
-        );
+      // Prepare input list
+      List input = await compute(FaceRecognitionService.prepareInputFromNV21, {
+        'nv21Data': image.planes[0].bytes,
+        'width': image.width,
+        'height': image.height,
+        'isFrontCamera':
+            widget.camera.lensDirection == CameraLensDirection.front,
+        'face': faces.first
       });
-    }
 
-    _isBusy = false;
+      // Get embedding
+      final embedding = _faceService.getEmbedding(input);
+      // Identify the face
+      final name = await _faceService.identifyFace(embedding);
+
+      // Update UI
+      if (mounted) {
+        setState(() {
+          _customPaint = CustomPaint(
+            painter: FaceDetectorPainter(
+              faces,
+              inputImage.metadata!.size,
+              inputImage.metadata!.rotation,
+              widget.camera.lensDirection,
+              name,
+            ),
+          );
+        });
+      }
+    } finally {
+      _isBusy = false;
+    }
   }
 
   @override

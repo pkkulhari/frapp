@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:frapp/services/face_recognition_service.dart';
-import 'package:image/image.dart' as img;
 
 class RegisterFacePage extends StatefulWidget {
   const RegisterFacePage({super.key});
@@ -43,41 +42,29 @@ class _RegisterFacePageState extends State<RegisterFacePage> {
     if (image == null) return;
 
     InputImage inputImage = InputImage.fromFile(File(image.path));
-
-    final faces = await _faceService.processImage(inputImage);
+    final faces = await _faceService.detectFaces(inputImage);
     if (faces.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No face detected')),
-      );
-      return;
-    }
-    img.Image? srcImage = img.decodeImage(File(image.path).readAsBytesSync());
-    if (srcImage == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error decoding image')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No face detected')),
+        );
+      }
       return;
     }
 
-    final embedding = await _faceService.getEmbedding(srcImage, faces.first);
-    if (embedding == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No face detected')),
-      );
-      return;
-    }
+    final input = FaceRecognitionService.prepareInputFromImagePath({
+      'imgPath': image.path,
+      'face': faces.first,
+    });
+    final embedding = _faceService.getEmbedding(input);
 
-    try {
-      await _faceService.registerFace(nameController.text, embedding);
+    await _faceService.registerFace(nameController.text, embedding);
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Face registered successfully'),
           backgroundColor: Colors.green,
         ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
       );
     }
   }
