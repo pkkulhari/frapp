@@ -16,6 +16,7 @@ class _RegisterFacePageState extends State<RegisterFacePage> {
   final TextEditingController nameController = TextEditingController();
   final _imagePicker = ImagePicker();
   final _faceService = FaceRecognitionService();
+  bool _isLoading = false;
 
   @override
   void initState() {
@@ -38,27 +39,56 @@ class _RegisterFacePageState extends State<RegisterFacePage> {
       return;
     }
 
-    final image = await _imagePicker.pickImage(source: ImageSource.camera);
-    if (image == null) return;
+    setState(() {
+      _isLoading = true;
+    });
 
-    InputImage inputImage = InputImage.fromFile(File(image.path));
-    final faces = await _faceService.detectFaces(inputImage);
-    if (faces.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No face detected')),
-        );
+    try {
+      final image = await _imagePicker.pickImage(source: ImageSource.camera);
+      if (image == null) {
+        setState(() {
+          _isLoading = false;
+        });
+        return;
       }
-      return;
+
+      InputImage inputImage = InputImage.fromFile(File(image.path));
+      final faces = await _faceService.detectFaces(inputImage);
+      if (faces.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No face detected')),
+          );
+        }
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final input = FaceRecognitionService.prepareInputFromImagePath({
+        'imgPath': image.path,
+        'face': faces.first,
+      });
+      final embedding = _faceService.getEmbedding(input);
+
+      try {
+        await _faceService.registerFace(nameController.text, embedding);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error registering face: $e')),
+          );
+        }
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
 
-    final input = FaceRecognitionService.prepareInputFromImagePath({
-      'imgPath': image.path,
-      'face': faces.first,
-    });
-    final embedding = _faceService.getEmbedding(input);
-
-    await _faceService.registerFace(nameController.text, embedding);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -73,24 +103,40 @@ class _RegisterFacePageState extends State<RegisterFacePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Register Face')),
-      body: ListView(
-        children: <Widget>[
-          const SizedBox(height: 16.0),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: TextField(
-              controller: nameController,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                labelText: 'Your Name',
+      body: Stack(
+        children: [
+          ListView(
+            children: <Widget>[
+              const SizedBox(height: 16.0),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    labelText: 'Your Name',
+                  ),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 16.0),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: ElevatedButton(
-                onPressed: _registerFace, child: const Text('Register Face')),
+              const SizedBox(height: 16.0),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _registerFace,
+                  child: _isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Text('Register Face'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
