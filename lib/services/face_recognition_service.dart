@@ -104,7 +104,7 @@ class FaceRecognitionService {
   }
 
   Future<String> identifyFace(List<double> embedding,
-      {double threshold = 1.0}) async {
+      {double threshold = 0.8}) async {
     _cachedFaces ??= await _storageService.getFaces();
 
     double minDistance = double.maxFinite;
